@@ -301,8 +301,8 @@ defmodule AdminUiWeb.FreezerDashboardLive do
 
   defp format_report(report) when is_map(report) do
     sealed = if Map.get(report, :sealed, 0) == 1, do: "sealed", else: "clear"
-    provider = report |> Map.get(:provider) |> hex()
-    key = report |> Map.get(:seal_key_id) |> hex()
+    provider = report |> Map.get(:provider) |> hex() |> short_id()
+    key = report |> Map.get(:seal_key_id) |> hex() |> short_id()
     "#{sealed} · provider #{provider} · key #{key}"
   end
 
