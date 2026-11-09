@@ -1,7 +1,8 @@
 # Demo script — 90-second run sheet
 
-Status: **built; video not recorded.** This is the run sheet for the silent, captioned ~90 s
-walkthrough. The dashboard is the star of every beat.
+Status: **built; video recorded.** The silent, captioned ~90 s walkthrough is
+[assets/demo.mp4](../assets/demo.mp4). This is the run sheet it was recorded from. The dashboard
+is the star of every beat.
 
 ## Preconditions
 
@@ -95,6 +96,6 @@ docker compose -f deploy/compose.yml down -v
 
 ## Note on the video
 
-The video itself is a separate ask. This run sheet is designed for a silent 90-second cut with
-captions; no audio is needed. The dashboard is legible at 1080p: four freezer cards per row, the
-two site cards, the provider table, and the gateway audit table are the only moving parts.
+The recording is [assets/demo.mp4](../assets/demo.mp4) — 1920×1080, 90 seconds, silent, with
+burned-in captions. The dashboard is legible at 1080p: four freezer cards per row, the two site
+cards, the provider table, and the gateway audit table are the only moving parts.

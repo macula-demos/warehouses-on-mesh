@@ -78,6 +78,18 @@ payload; the gateway alone holds the KEM key.
   gateways' `ot/*` advertisements, shows both providers, and calls the chosen provider through
   station A. A background refresh keeps a slow DHT lookup off the LiveView's mailbox.
 
+## Demo video
+
+[![Demo poster](assets/demo-poster.png)](assets/demo.mp4)
+
+A 90-second silent walkthrough of the running lab, with captions. It covers the two-site
+topology and two providers, a cross-site read whose report says sealed, a cross-site write with
+the gateway audit and the controller's gateway-only audit, the replay and stranger refusals, and
+the posture evidence.
+
+- [assets/demo.mp4](assets/demo.mp4)
+- [assets/demo-poster.png](assets/demo-poster.png)
+
 ## Quick start
 
 ```bash
@@ -189,6 +201,10 @@ docs/
   PHASE0_RELAY_SPIKE.md The federation decision and its evidence
   DEMO_SCRIPT.md        ~90 s run sheet
   WHAT_THIS_PROVES.md   Claim-by-claim built/not-built boundaries
+assets/
+  demo.mp4              90-second silent captioned walkthrough
+  demo-poster.png       Poster frame
+  dashboard-site-b.png  Dashboard screenshot
 ```
 
 ## The controller API
