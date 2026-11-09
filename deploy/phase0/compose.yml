@@ -1,0 +1,105 @@
+name: warehouses-phase0
+
+# Phase 0 relay spike: two local macula stations, linked by outbound_peers.
+# This file is deliberately outside deploy/compose.yml: it exists to prove the
+# station-to-station path before any app code is written.
+
+services:
+  station-a-cookie:
+    image: alpine:3.20
+    user: "0:0"
+    network_mode: none
+    environment:
+      STATION_COOKIE: ${STATION_COOKIE:-d4f8a2c9e7b1f6a3c5d9e2b8f4a7c1d6e3b9f2a5c8d1e7b4a6f9c3d2e8b5a1f7}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /home/app
+        umask 077
+        printf '%s' "$$STATION_COOKIE" > /home/app/.erlang.cookie
+        chown 10001:10001 /home/app/.erlang.cookie
+        chmod 600 /home/app/.erlang.cookie
+    volumes:
+      - station_a_home:/home/app
+    restart: "no"
+
+  station-b-cookie:
+    image: alpine:3.20
+    user: "0:0"
+    network_mode: none
+    environment:
+      STATION_COOKIE: ${STATION_COOKIE:-d4f8a2c9e7b1f6a3c5d9e2b8f4a7c1d6e3b9f2a5c8d1e7b4a6f9c3d2e8b5a1f7}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /home/app
+        umask 077
+        printf '%s' "$$STATION_COOKIE" > /home/app/.erlang.cookie
+        chown 10001:10001 /home/app/.erlang.cookie
+        chmod 600 /home/app/.erlang.cookie
+    volumes:
+      - station_b_home:/home/app
+    restart: "no"
+
+  station-a:
+    image: ghcr.io/macula-io/macula-station:0.13.3
+    depends_on:
+      station-a-cookie:
+        condition: service_completed_successfully
+    environment:
+      MACULA_STATION_CONFIG: /etc/macula-station/config.json
+      MACULA_NODE_NAME: macula_station_a
+    volumes:
+      - ../generated/phase0/station-a.json:/etc/macula-station/config.json:ro
+      - station_a_home:/home/app
+      - station_a_data:/var/lib/macula/station
+    networks:
+      mesh_net:
+        ipv4_address: 172.28.0.10
+    pids_limit: 4096
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8443/wire"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  station-b:
+    image: ghcr.io/macula-io/macula-station:0.13.3
+    depends_on:
+      station-b-cookie:
+        condition: service_completed_successfully
+    environment:
+      MACULA_STATION_CONFIG: /etc/macula-station/config.json
+      MACULA_NODE_NAME: macula_station_b
+    volumes:
+      - ../generated/phase0/station-b.json:/etc/macula-station/config.json:ro
+      - station_b_home:/home/app
+      - station_b_data:/var/lib/macula/station
+    networks:
+      mesh_net:
+        ipv4_address: 172.28.0.11
+    pids_limit: 4096
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8443/wire"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+networks:
+  mesh_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  station_a_home:
+  station_b_home:
+  station_a_data:
+  station_b_data:

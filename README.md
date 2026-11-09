@@ -4,8 +4,10 @@ Part 2 of the macula-demos OT series: the same cold-chain company opens a second
 and the mesh is what connects them — two sites, two gateways, a relay in between, and no
 inbound port anywhere.
 
-**Status: planned.** This repository is initiated but nothing is built yet. The build spec is
-in [CLAUDE.md](CLAUDE.md).
+**Status: Phase 0 decided.** The local relay spike proved two federated stations and a sealed
+CALL forwarded from station A to station B; see
+[docs/PHASE0_RELAY_SPIKE.md](docs/PHASE0_RELAY_SPIKE.md). The demo app is not built yet. The
+build spec is in [CLAUDE.md](CLAUDE.md).
 
 ## The one claim this demo makes
 
@@ -42,9 +44,10 @@ resolves both providers and picks by site.
  └──────────────────────┘
 ```
 
-Whether the relay is one station both sites dial, or two federated stations, is phase 0 of the
-build — see [CLAUDE.md](CLAUDE.md). The claim requires the call to cross a station; the
-two-station version proves the strongest form of it.
+The relay is **two federated stations** — phase 0 proved it in this local lab, with a sealed
+CALL forwarded by station A to station B. See
+[docs/PHASE0_RELAY_SPIKE.md](docs/PHASE0_RELAY_SPIKE.md). The claimed path is a CALL sent to
+the site's own station with the other site's provider as its target; station A forwards it.
 
 ## What gets reused
 

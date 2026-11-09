@@ -1,7 +1,9 @@
 # What this demo will prove — and what it will not
 
-Status: **planned**. Nothing is built yet. Every row below must be updated to built/not-built
-as phases land, in the style of `freezers-on-mesh` (part 1).
+Status: **planned; Phase 0 decided.** The relay spike proved two federated stations and a
+sealed CALL forwarded from station A to station B — see
+[PHASE0_RELAY_SPIKE.md](PHASE0_RELAY_SPIKE.md). No demo app code exists yet. Every row below
+must be updated to built/not-built as phases land, in the style of `freezers-on-mesh` (part 1).
 
 | # | Claim | Status |
 |---|-------|--------|
