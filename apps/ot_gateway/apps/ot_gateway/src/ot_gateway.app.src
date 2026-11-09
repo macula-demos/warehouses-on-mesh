@@ -1,0 +1,18 @@
+{application, ot_gateway, [
+    {description, "Cold-chain REST to Macula RPC gateway"},
+    {vsn, "0.1.0"},
+    {registered, [ot_gateway_sup]},
+    {mod, {ot_gateway_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        inets,
+        mcl_om,
+        jsx
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

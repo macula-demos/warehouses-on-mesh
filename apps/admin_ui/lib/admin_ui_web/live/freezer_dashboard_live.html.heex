@@ -1,0 +1,431 @@
+<Layouts.app flash={@flash}>
+  <div class="space-y-8">
+    <section class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+      <div>
+        <div class="flex flex-wrap items-center gap-3">
+          <span class={[
+            "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-[0.2em]",
+            if(@mode == :legacy,
+              do: "border-red-500/30 bg-red-500/10 text-red-300",
+              else: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+            )
+          ]}>
+            <span class={[
+              "size-1.5 rounded-full",
+              if(@mode == :legacy, do: "bg-red-400", else: "bg-emerald-400")
+            ]}></span>
+            {if @mode == :legacy, do: "Legacy path", else: "Mesh path"}
+          </span>
+          <span class="text-[10px] uppercase tracking-[0.25em] text-slate-500">OT security lab</span>
+        </div>
+        <h1 class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+          Cold chain control
+        </h1>
+        <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
+          <%= if @mode == :legacy do %>
+            The same freezer dashboard, two network paths. The controller is exposed through the
+            shop's port forward and answers REST directly. The login is a UI gate, not an API
+            boundary.
+          <% else %>
+            The same freezer dashboard, two network paths. The controller sits behind a Macula
+            gateway that only dials out; the browser still talks only to this local app.
+          <% end %>
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-3 sm:items-end">
+        <div class="inline-flex rounded-2xl border border-slate-800 bg-slate-900/80 p-1 shadow-lg shadow-black/20">
+          <button
+            phx-click="switch_mode"
+            phx-value-mode="legacy"
+            class={[
+              "rounded-xl px-4 py-2 text-sm font-medium transition",
+              if(@mode == :legacy,
+                do: "bg-red-500/15 text-red-200 shadow-inner shadow-red-500/10",
+                else: "text-slate-400 hover:text-slate-200"
+              )
+            ]}
+          >
+            Legacy
+          </button>
+          <button
+            phx-click="switch_mode"
+            phx-value-mode="mesh"
+            disabled={!@mesh_ready?}
+            class={[
+              "rounded-xl px-4 py-2 text-sm font-medium transition",
+              if(@mode == :mesh,
+                do: "bg-emerald-500/15 text-emerald-200",
+                else: "text-slate-500"
+              ),
+              if(@mesh_ready?,
+                do: "hover:text-slate-200",
+                else: "cursor-not-allowed opacity-50"
+              )
+            ]}
+          >
+            Mesh
+            <span class="ml-1 rounded bg-emerald-500/10 px-1 py-0.5 text-[9px] uppercase tracking-wider text-emerald-300/80">
+              RPC
+            </span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">
+          Last refresh {format_time(@last_refresh_ms)} · {@freezer_count} freezers
+        </p>
+      </div>
+    </section>
+
+    <%= if @error do %>
+      <div class="flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+        <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0 text-amber-300" />
+        <div>
+          <p class="font-medium">Path unavailable</p>
+          <p class="mt-1 text-amber-100/70">{@error}</p>
+          <p class="mt-2 text-xs text-amber-100/50">
+            <%= if @mode == :legacy do %>
+              If you stopped the <code class="rounded bg-black/30 px-1">legacy-edge</code>
+              container, this is the retrofit moment. Switch to Mesh mode to use the gateway.
+            <% else %>
+              The mesh client retries every second. Check the station, the realm fixture, and the
+              gateway.
+            <% end %>
+          </p>
+        </div>
+      </div>
+    <% end %>
+
+    <section class="grid gap-4 md:grid-cols-3">
+      <%= if @mode == :legacy do %>
+        <.posture_card
+          title="Exposure"
+          value="80/tcp · 443/tcp"
+          tone={:danger}
+          detail="The shop's port forward publishes the controller's admin and REST surface to the internet."
+        />
+        <.posture_card
+          title="Authentication"
+          value="shared admin/admin"
+          tone={:warning}
+          detail="Reads are open. Writes use one shared password; the UI login is not a security boundary."
+        />
+        <.posture_card
+          title="Audit"
+          value="IP + shared user"
+          tone={:warning}
+          detail="The controller records the source address and the shared account, not a per-operator identity."
+        />
+      <% else %>
+        <.posture_card
+          title="Exposure"
+          value="no inbound port"
+          tone={:success}
+          detail="The gateway dials out to the station and has no network-facing TCP listener. The controller is only on the OT network."
+        />
+        <.posture_card
+          title="Authentication"
+          value="operator node"
+          tone={:success}
+          detail="Reads stay open. Writes are authorized by the operator's node identity; the browser never holds the key."
+        />
+        <.posture_card
+          title="Audit"
+          value="caller + command id"
+          tone={:success}
+          detail="The gateway records the verified caller, the command id, and the result. The legacy controller only sees the gateway account."
+        />
+      <% end %>
+    </section>
+
+    <section>
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Freezers</h2>
+          <p class="mt-1 text-sm text-slate-400">
+            Live simulator. A +50°C target is enough to push frozen stock out of its safe band.
+          </p>
+        </div>
+        <div class="text-xs text-slate-500">{@freezer_count} units</div>
+      </div>
+
+      <div id="freezers" phx-update="stream" class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div :for={{dom_id, freezer} <- @streams.freezers} id={dom_id}>
+          <.freezer_card
+            freezer={freezer}
+            readings={Map.get(@readings, freezer["id"], [])}
+            writes_enabled?={writes_enabled?(@mode, @auth, @mesh_ready?)}
+          />
+        </div>
+      </div>
+    </section>
+
+    <%= if @mode == :legacy do %>
+      <section class="grid gap-4 lg:grid-cols-2">
+        <article class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-sm font-semibold text-white">Operator sign-in</h2>
+              <p class="mt-1 text-xs leading-5 text-slate-400">
+                The controller accepts one shared account. The login is enforced by this UI, not by
+                the controller API.
+              </p>
+            </div>
+            <span class={[
+              "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+              if(@auth,
+                do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+                else: "border-slate-700 bg-slate-800 text-slate-400"
+              )
+            ]}>
+              {if @auth, do: "signed in", else: "signed out"}
+            </span>
+          </div>
+
+          <%= if @auth do %>
+            <div class="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
+              <span class="text-slate-300">{@auth.user}</span>
+              <button phx-click="logout" class="text-xs text-slate-500 hover:text-slate-300">
+                Sign out
+              </button>
+            </div>
+          <% else %>
+            <.form for={@login_form} id="login-form" phx-submit="login" class="mt-4 space-y-3">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <.input
+                  field={@login_form[:username]}
+                  type="text"
+                  label="Username"
+                  autocomplete="username"
+                  class="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500/20"
+                />
+                <.input
+                  field={@login_form[:password]}
+                  type="password"
+                  label="Password"
+                  autocomplete="current-password"
+                  class="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500/20"
+                />
+              </div>
+              <button
+                type="submit"
+                class="w-full rounded-xl bg-red-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-400"
+              >
+                Sign in to write
+              </button>
+              <p class="text-center text-[11px] text-slate-500">
+                Default lab credentials: <span class="font-mono text-slate-400">admin/admin</span>
+              </p>
+            </.form>
+          <% end %>
+        </article>
+
+        <article class="relative overflow-hidden rounded-2xl border border-red-500/30 bg-red-950/30 p-5">
+          <div class="pointer-events-none absolute -right-12 -top-12 size-40 rounded-full bg-red-500/10 blur-2xl">
+          </div>
+          <div class="relative">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-sm font-semibold text-red-100">Attacker view</h2>
+                <p class="mt-1 text-xs leading-5 text-red-200/60">
+                  No login. No per-command authorization. These are the same calls a stranger makes
+                  from the internet.
+                </p>
+              </div>
+              <.icon name="hero-bug-ant" class="size-5 text-red-300/70" />
+            </div>
+
+            <div class="mt-4 grid gap-2 sm:grid-cols-3">
+              <button
+                phx-click="attack_read"
+                class="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 transition hover:bg-red-500/20"
+              >
+                Read all freezers
+              </button>
+              <button
+                phx-click="attack_set_target"
+                class="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 transition hover:bg-red-500/20"
+              >
+                Set FZ-01 to +50°C
+              </button>
+              <button
+                phx-click="attack_defrost"
+                class="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 transition hover:bg-red-500/20"
+              >
+                Force defrost
+              </button>
+            </div>
+
+            <div
+              :if={@attack_result}
+              class={[
+                "mt-3 rounded-xl border px-3 py-2 text-xs",
+                attack_result_class(@attack_result.kind)
+              ]}
+            >
+              <div class="flex items-start justify-between gap-3">
+                <p>{@attack_result.text}</p>
+                <button phx-click="dismiss_attack" class="text-current/60 hover:text-current">
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <button
+              phx-click="reset_lab"
+              class="mt-4 text-[11px] text-red-200/50 underline-offset-2 hover:text-red-200/80 hover:underline"
+            >
+              Reset the lab to safe temperatures
+            </button>
+          </div>
+        </article>
+      </section>
+    <% else %>
+      <section class="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-emerald-100">Mesh path</h2>
+            <p class="mt-1 max-w-2xl text-xs leading-5 text-emerald-200/60">
+              The local Phoenix app is the mesh citizen. It resolves the gateway's typed
+              capabilities through the station and calls them directly. The controller has no
+              internet-facing port.
+            </p>
+          </div>
+          <.icon name="hero-shield-check" class="size-5 text-emerald-300/80" />
+        </div>
+        <div class="mt-4 grid gap-2 text-xs text-emerald-100/70 sm:grid-cols-2">
+          <p>Transport: local UI → station → gateway</p>
+          <p>Gateway: no network-facing TCP listener</p>
+          <p>Read policy: open</p>
+          <p>Write policy: operator node only</p>
+          <p class="sm:col-span-2">
+            Operator:
+            <span class="font-mono" title={@operator_node_id || ""}>
+              {short_id(@operator_node_id)}
+            </span>
+          </p>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button
+            phx-click="replay_last"
+            disabled={!@mesh_ready?}
+            class="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Replay last command (should be refused)
+          </button>
+          <button
+            phx-click="stranger_write"
+            disabled={!@mesh_ready?}
+            class="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Try as stranger (should be refused)
+          </button>
+        </div>
+        <p class="mt-2 max-w-2xl text-[11px] leading-5 text-emerald-200/50">
+          Replay re-sends the previous command id; the guard refuses it. The stranger is a
+          second node identity; the gateway refuses it before the command reaches the handler.
+        </p>
+        <p :if={@seal_report} class="mt-3 text-[11px] text-emerald-200/50">
+          Last call: <span class="font-mono">{format_report(@seal_report)}</span>
+        </p>
+      </section>
+    <% end %>
+
+    <%= if @mode == :legacy do %>
+      <section>
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Controller audit</h2>
+            <p class="mt-1 text-sm text-slate-400">
+              What the legacy controller saw. The attacker's writes appear here with the shared
+              account.
+            </p>
+          </div>
+          <div class="text-xs text-slate-500">{@audit_count} entries</div>
+        </div>
+
+        <div class="mt-4 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+          <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+            <thead class="bg-slate-900/80 text-[10px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th class="px-4 py-3 font-medium">Time</th>
+                <th class="px-4 py-3 font-medium">User</th>
+                <th class="px-4 py-3 font-medium">Source</th>
+                <th class="px-4 py-3 font-medium">Action</th>
+                <th class="px-4 py-3 font-medium">Freezer</th>
+                <th class="px-4 py-3 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody id="audit" phx-update="stream" class="divide-y divide-slate-800/80">
+              <tr :for={{dom_id, entry} <- @streams.audit} id={dom_id} class="text-slate-300">
+                <td class="whitespace-nowrap px-4 py-3 text-slate-400">
+                  {format_time(entry["at_ms"])}
+                </td>
+                <td class="px-4 py-3">{entry["user"]}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-400">{entry["source_ip"]}</td>
+                <td class="px-4 py-3">{entry["action"]}</td>
+                <td class="px-4 py-3">{entry["freezer_id"] || "—"}</td>
+                <td class="px-4 py-3">{entry["result"]}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p :if={@audit_count == 0} class="px-4 py-6 text-sm text-slate-500">
+            No writes yet. Try the attacker panel.
+          </p>
+        </div>
+      </section>
+    <% end %>
+
+    <%= if @mode == :mesh do %>
+      <section>
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Gateway audit</h2>
+            <p class="mt-1 text-sm text-slate-400">
+              Commands the gateway processed, with the verified operator node and the command id.
+              The legacy controller only sees the gateway's own account.
+            </p>
+          </div>
+          <div class="text-xs text-slate-500">{@gateway_audit_count} entries</div>
+        </div>
+
+        <div class="mt-4 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+          <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+            <thead class="bg-slate-900/80 text-[10px] uppercase tracking-wider text-slate-500">
+              <tr>
+                <th class="px-4 py-3 font-medium">Time</th>
+                <th class="px-4 py-3 font-medium">Caller</th>
+                <th class="px-4 py-3 font-medium">Action</th>
+                <th class="px-4 py-3 font-medium">Freezer</th>
+                <th class="px-4 py-3 font-medium">Command</th>
+                <th class="px-4 py-3 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody id="gateway-audit" phx-update="stream" class="divide-y divide-slate-800/80">
+              <tr
+                :for={{dom_id, entry} <- @streams.gateway_audit}
+                id={dom_id}
+                class="text-slate-300"
+              >
+                <td class="whitespace-nowrap px-4 py-3 text-slate-400">
+                  {format_time(entry["at_ms"])}
+                </td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-400" title={entry["caller"]}>
+                  {short_id(entry["caller"])}
+                </td>
+                <td class="px-4 py-3">{entry["action"]}</td>
+                <td class="px-4 py-3">{entry["freezer_id"] || "—"}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-400" title={entry["command_id"]}>
+                  {short_id(entry["command_id"])}
+                </td>
+                <td class="px-4 py-3">{entry["result"]}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p :if={@gateway_audit_count == 0} class="px-4 py-6 text-sm text-slate-500">
+            No gateway commands yet. Use the freezer controls in Mesh mode.
+          </p>
+        </div>
+      </section>
+    <% end %>
+  </div>
+</Layouts.app>

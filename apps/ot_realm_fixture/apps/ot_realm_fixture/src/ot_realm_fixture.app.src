@@ -1,0 +1,17 @@
+{application, ot_realm_fixture, [
+    {description, "Lab-only realm fixture: D25 chain and boot-claim responder"},
+    {vsn, "0.1.0"},
+    {registered, [ot_realm_fixture_sup]},
+    {mod, {ot_realm_fixture_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        macula,
+        jsx
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

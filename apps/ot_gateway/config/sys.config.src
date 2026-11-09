@@ -1,0 +1,21 @@
+%% Substituted by relx at boot. A missing ${VAR} is a boot failure, not a
+%% half-configured node that looks healthy and serves nobody.
+[
+    {mcl_om, [
+        {identity_key_path, "/etc/mcl/secrets/identity.key"},
+        {health_socket, "/run/mcl/health.sock"},
+        {capability_topic, <<"_mesh.cap.">>},
+        {mesh, required},
+        {realm, <<"${MCL_REALM}">>},
+        {org, <<"ot">>},
+        {realm_key, <<"${MCL_REALM_KEY}">>}
+    ]},
+    {macula, [
+        {crypto_profile, pq_hybrid},
+        %% The gateway names its KEM key, so a caller seals the payload and the
+        %% station relays ciphertext. The typed gateway can require this; the
+        %% raw macula_bridge drops the option.
+        {kem_advertise, enabled}
+    ]},
+    {kernel, [{logger_level, info}]}
+].

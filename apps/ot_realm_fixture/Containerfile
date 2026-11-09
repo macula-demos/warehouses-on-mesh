@@ -1,0 +1,34 @@
+FROM ghcr.io/macula-io/macula-ci-otp:20260923-1444@sha256:dd2ba6eb858a0eacedf0179300323fe5c6da46fb308d22da0ca8cfcd1f0718dc AS builder
+
+RUN erl -noshell -eval ' \
+    Otp = string:trim(element(2, file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])))), \
+    Mldsa = lists:member(mldsa87, crypto:supports(public_keys)), \
+    io:format("OTP ~s, mldsa87 ~p~n", [Otp, Mldsa]), \
+    case {Otp, Mldsa} of \
+        {<<"28.4.3">>, true} -> halt(0); \
+        _                    -> halt(1) \
+    end.'
+
+WORKDIR /build
+
+COPY rebar.config ./
+RUN rebar3 get-deps
+
+COPY config ./config
+COPY apps ./apps
+RUN rebar3 as prod release
+
+FROM ghcr.io/macula-io/macula-pq-runtime:20260923-1444@sha256:15a5501b7277804c5a62c93121d157773d1401d238a1bf630ef4b50fc2f1df09
+
+WORKDIR /app
+COPY --from=builder /build/_build/prod/rel/ot_realm_fixture ./
+
+ENV HOME=/app
+ENV RELX_REPLACE_OS_VARS=true
+ENV MCL_NODE_NAME=ot_realm_fixture
+ENV MCL_NODE_HOST=127.0.0.1
+ENV MCL_COOKIE=ot_realm_fixture
+
+VOLUME ["/data", "/mesh"]
+
+CMD ["/app/bin/ot_realm_fixture", "foreground"]

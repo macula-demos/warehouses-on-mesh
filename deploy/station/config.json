@@ -1,0 +1,28 @@
+{
+  "data_dir": "/var/lib/macula/station",
+  "bind": "0.0.0.0",
+  "port": 4433,
+  "cache": {
+    "path": "/var/lib/macula/station/cache",
+    "flush_period_ms": 30000
+  },
+  "admin": {
+    "bind": "127.0.0.1",
+    "port": 8443
+  },
+  "puzzle_enforcement": "off",
+  "bootstrap": {
+    "discoverers": [
+      {
+        "module": "macula_station_via_seed_dial",
+        "opts": {
+          "wait_ms": 100
+        }
+      }
+    ],
+    "cascade_opts": {
+      "min_peers": 0,
+      "timeout_ms": 30000
+    }
+  }
+}

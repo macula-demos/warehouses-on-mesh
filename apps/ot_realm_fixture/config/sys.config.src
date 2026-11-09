@@ -1,0 +1,4 @@
+[
+    {macula, [{crypto_profile, pq_hybrid}]},
+    {kernel, [{logger_level, info}]}
+].

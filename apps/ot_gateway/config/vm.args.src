@@ -1,0 +1,13 @@
+## Runtime flags for the OT gateway.
+##
+## Distribution is only for the release control script (start/stop/remote).
+## Bind both EPMD and the distribution listener to loopback so the gateway has
+## no inbound TCP port on a network interface. Its real control path is the
+## outbound Macula station link; its local health endpoint is a Unix socket.
+
+-name ${MCL_NODE_NAME}@${MCL_NODE_HOST}
+-setcookie ${MCL_COOKIE}
+-kernel inet_dist_use_interface {127,0,0,1}
+
++K true
++A 8
