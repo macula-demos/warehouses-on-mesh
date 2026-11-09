@@ -12,6 +12,9 @@ walkthrough. The dashboard is the star of every beat.
   the two gateways, the fixture, and the dashboard, then waits for both stations to federate,
   both gateways to claim, and the UI to settle. Later runs reuse the cache.
 - Open <http://localhost:4000> at 1920×1080, dark theme. The dashboard opens on **Site A**.
+- Wait until the **Providers** table shows **2 providers** (the second advertisement crosses
+  the station link; this can take up to 30 s after the gateways start). Then the topology beat
+  is ready to record.
 
 ## The run sheet
 
