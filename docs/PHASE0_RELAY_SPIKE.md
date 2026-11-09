@@ -81,9 +81,10 @@ request.
   `forward_rtt` is the station's own histogram for a forwarded CALL's round
   trip through its advertiser. A station that only answered locally would not
   produce it.
-- Station A's `/health` `call_bounds.forwards_in_flight` was non-zero while a
-  forwarded call was outstanding and returned to zero after the reply; the
-  call-bounds counters stayed at zero (no drops).
+- Station A's `/health` `call_bounds.forwards_in_flight` was zero after the
+  reply, and every call-bounds drop counter stayed at zero. The in-flight
+  count is a gauge, so the evidence that a call was forwarded is the
+  `forward_rtt` histogram, not a snapshot taken after the reply.
 
 ## Honest boundary found during the spike
 
