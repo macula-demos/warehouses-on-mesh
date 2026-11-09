@@ -8,9 +8,19 @@ COMPOSE=(docker compose -f "$ROOT/deploy/phase0/compose.yml")
 GEN="$ROOT/deploy/generated/phase0"
 CODE="$ROOT/deploy/phase0/spike"
 STATE="$GEN/spike"
+SPIKE_IMAGE="warehouses-demo/ot-gateway:dev"
 
 mkdir -p "$GEN" "$STATE"
 rm -f "$STATE/provider-node-id" "$STATE/realm.pub"
+
+if ! docker image inspect "$SPIKE_IMAGE" >/dev/null 2>&1; then
+  if docker image inspect ot-demo/ot-gateway:dev >/dev/null 2>&1; then
+    SPIKE_IMAGE="ot-demo/ot-gateway:dev"
+  else
+    echo "Building the gateway image (it supplies the macula runtime for the spike)..."
+    docker compose -f "$ROOT/deploy/compose.yml" build ot-gateway-a
+  fi
+fi
 
 echo "Compiling the spike module..."
 (cd "$CODE" && erlc spike.erl)
@@ -109,7 +119,7 @@ docker run -d --name phase0-provider --pids-limit -1 \
   -v "$CODE:/spikecode" \
   -v "$STATE:/spike" \
   --entrypoint /app/erts-16.3.1/bin/erl \
-  ot-demo/ot-gateway:dev \
+  "$SPIKE_IMAGE" \
   -boot /app/releases/0.1.0/start_clean \
   -config /spikecode/sys.config \
   -pa /app/lib/macula-18.3.0/ebin -pa /spikecode \
@@ -133,7 +143,7 @@ docker run --rm --pids-limit -1 \
   -v "$CODE:/spikecode" \
   -v "$STATE:/spike" \
   --entrypoint /app/erts-16.3.1/bin/erl \
-  ot-demo/ot-gateway:dev \
+  "$SPIKE_IMAGE" \
   -boot /app/releases/0.1.0/start_clean \
   -config /spikecode/sys.config \
   -pa /app/lib/macula-18.3.0/ebin -pa /spikecode \
