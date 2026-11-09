@@ -3,6 +3,7 @@ defmodule FreezerController.Freezer do
 
   @enforce_keys [
     :id,
+    :site_id,
     :name,
     :kind,
     :current_c,
@@ -14,6 +15,7 @@ defmodule FreezerController.Freezer do
 
   defstruct [
     :id,
+    :site_id,
     :name,
     :kind,
     :current_c,
@@ -34,6 +36,7 @@ defmodule FreezerController.Freezer do
 
   @type t :: %__MODULE__{
           id: String.t(),
+          site_id: String.t(),
           name: String.t(),
           kind: kind(),
           current_c: float(),
@@ -52,6 +55,7 @@ defmodule FreezerController.Freezer do
   def snapshot(%__MODULE__{} = freezer) do
     %{
       id: freezer.id,
+      site_id: freezer.site_id,
       name: freezer.name,
       kind: Atom.to_string(freezer.kind),
       current_c: round1(freezer.current_c),

@@ -9,12 +9,11 @@ import Config
 
 config :admin_ui,
   generators: [timestamp_type: :utc_datetime],
-  legacy_edge_url: "http://localhost:8080",
   mesh_config_path: "/mesh/realm.json",
   mesh_identity_path: "/data/operator.key",
   mesh_stranger_identity_path: "/data/stranger.key",
   mesh_operator_node_id_path: "/mesh/operator-node-id",
-  mesh_station_seed: "station:4433"
+  mesh_station_seed: "station-a:4433"
 
 config :macula, crypto_profile: :pq_hybrid
 

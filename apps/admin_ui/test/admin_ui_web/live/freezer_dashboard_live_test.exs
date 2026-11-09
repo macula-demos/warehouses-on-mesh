@@ -3,38 +3,26 @@ defmodule AdminUiWeb.FreezerDashboardLiveTest do
 
   import Phoenix.LiveViewTest
 
-  setup do
-    previous = Application.get_env(:admin_ui, :legacy_edge_url)
-
-    pid =
-      start_supervised!(
-        {Bandit, plug: AdminUiWeb.ControllerStub, port: 0, ip: {127, 0, 0, 1}, scheme: :http}
-      )
-
-    {:ok, {_address, port}} = ThousandIsland.listener_info(pid)
-    Application.put_env(:admin_ui, :legacy_edge_url, "http://127.0.0.1:#{port}")
-
-    on_exit(fn -> Application.put_env(:admin_ui, :legacy_edge_url, previous) end)
-    :ok
-  end
-
-  test "renders the legacy dashboard and the controller audit", %{conn: conn} do
+  test "renders the two-site mesh dashboard", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
 
-    assert has_element?(view, "#freezer-FZ-01")
-    assert has_element?(view, "#freezer-FZ-01", "Frozen aisle 1")
-    assert has_element?(view, "#audit")
-    assert has_element?(view, "#login-form")
-    assert has_element?(view, "#login-form button", "Sign in to write")
+    assert has_element?(view, "h1", "Two warehouses, one mesh")
+    assert has_element?(view, "button[phx-value-site='A']")
+    assert has_element?(view, "button[phx-value-site='B']")
+    assert has_element?(view, "#freezers")
+    assert render(view) =~ "Providers"
+    assert render(view) =~ "Gateway A audit"
   end
 
-  test "the attacker panel writes with the default credentials", %{conn: conn} do
+  test "switching to site B selects the relay view", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
 
     view
-    |> element("button", "Set FZ-01 to +50°C")
+    |> element("button[phx-value-site='B']")
     |> render_click()
 
-    assert render(view) =~ "Set FZ-01 to +50°C using the default admin/admin credentials."
+    assert render(view) =~ "Site B freezers"
+    assert render(view) =~ "via relay"
+    assert render(view) =~ "Gateway B audit"
   end
 end

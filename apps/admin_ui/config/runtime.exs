@@ -24,10 +24,6 @@ port = String.to_integer(System.get_env("PORT", "4000"))
 
 config :admin_ui, AdminUiWeb.Endpoint, http: [port: port]
 
-if url = System.get_env("LEGACY_EDGE_URL") do
-  config :admin_ui, :legacy_edge_url, url
-end
-
 if path = System.get_env("MESH_CONFIG_PATH") do
   config :admin_ui, :mesh_config_path, path
 end

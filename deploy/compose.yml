@@ -1,9 +1,10 @@
 name: warehouses-lab
 
-# Phase 1 baseline: part 1's single-site lab, without the attacker container
-# and without the legacy edge. It is the base the two-site split grows from.
+# Two sites, two gateways, two federated stations, and one dashboard at site A.
+# Neither site publishes an inbound port; everything dials out. The only
+# published port is the dashboard's browser listener.
 services:
-  station-cookie:
+  station-a-cookie:
     image: alpine:3.20
     user: "0:0"
     network_mode: none
@@ -20,22 +21,44 @@ services:
         chown 10001:10001 /home/app/.erlang.cookie
         chmod 600 /home/app/.erlang.cookie
     volumes:
-      - station_home:/home/app
+      - station_a_home:/home/app
     restart: "no"
 
-  station:
+  station-b-cookie:
+    image: alpine:3.20
+    user: "0:0"
+    network_mode: none
+    environment:
+      STATION_COOKIE: ${STATION_COOKIE:-d4f8a2c9e7b1f6a3c5d9e2b8f4a7c1d6e3b9f2a5c8d1e7b4a6f9c3d2e8b5a1f7}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /home/app
+        umask 077
+        printf '%s' "$$STATION_COOKIE" > /home/app/.erlang.cookie
+        chown 10001:10001 /home/app/.erlang.cookie
+        chmod 600 /home/app/.erlang.cookie
+    volumes:
+      - station_b_home:/home/app
+    restart: "no"
+
+  station-a:
     image: ghcr.io/macula-io/macula-station:0.13.3
     depends_on:
-      station-cookie:
+      station-a-cookie:
         condition: service_completed_successfully
     environment:
       MACULA_STATION_CONFIG: /etc/macula-station/config.json
+      MACULA_NODE_NAME: macula_station_a
     volumes:
-      - ./station/config.json:/etc/macula-station/config.json:ro
-      - station_home:/home/app
-      - station_data:/var/lib/macula/station
+      - ./generated/station-a.json:/etc/macula-station/config.json:ro
+      - station_a_home:/home/app
+      - station_a_data:/var/lib/macula/station
     networks:
-      - mesh_net
+      mesh_net:
+        ipv4_address: 172.28.0.10
     pids_limit: 4096
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/wire"]
@@ -44,19 +67,65 @@ services:
       retries: 20
     restart: unless-stopped
 
-  freezer-controller:
+  station-b:
+    image: ghcr.io/macula-io/macula-station:0.13.3
+    depends_on:
+      station-b-cookie:
+        condition: service_completed_successfully
+    environment:
+      MACULA_STATION_CONFIG: /etc/macula-station/config.json
+      MACULA_NODE_NAME: macula_station_b
+    volumes:
+      - ./generated/station-b.json:/etc/macula-station/config.json:ro
+      - station_b_home:/home/app
+      - station_b_data:/var/lib/macula/station
+    networks:
+      mesh_net:
+        ipv4_address: 172.28.0.11
+    pids_limit: 4096
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8443/wire"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  freezer-controller-a:
     build:
       context: ../apps/freezer_controller
     image: warehouses-demo/freezer-controller:dev
     pull_policy: build
     environment:
+      SITE_ID: A
       LEGACY_ADMIN_USER: admin
       LEGACY_ADMIN_PASSWORD: admin
       GATEWAY_USER: gateway
       GATEWAY_PASSWORD: ${GATEWAY_PASSWORD:-gateway-demo-password}
       SIM_SPEED: "5"
     networks:
-      - ot_net
+      - site_a_net
+    pids_limit: 4096
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    restart: unless-stopped
+
+  freezer-controller-b:
+    build:
+      context: ../apps/freezer_controller
+    image: warehouses-demo/freezer-controller:dev
+    pull_policy: build
+    environment:
+      SITE_ID: B
+      LEGACY_ADMIN_USER: admin
+      LEGACY_ADMIN_PASSWORD: admin
+      GATEWAY_USER: gateway
+      GATEWAY_PASSWORD: ${GATEWAY_PASSWORD:-gateway-demo-password}
+      SIM_SPEED: "5"
+    networks:
+      - site_b_net
     pids_limit: 4096
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
@@ -72,7 +141,9 @@ services:
     image: warehouses-demo/ot-realm-fixture:dev
     pull_policy: build
     depends_on:
-      station:
+      station-a:
+        condition: service_started
+      station-b:
         condition: service_started
     volumes:
       - ./generated:/mesh
@@ -82,36 +153,69 @@ services:
     pids_limit: 4096
     restart: unless-stopped
 
-  ot-gateway:
+  ot-gateway-a:
     build:
       context: ../apps/ot_gateway
       dockerfile: Containerfile
     image: warehouses-demo/ot-gateway:dev
     pull_policy: build
     depends_on:
-      station:
+      station-a:
         condition: service_started
       ot-realm-fixture:
         condition: service_started
-      freezer-controller:
+      freezer-controller-a:
         condition: service_healthy
       admin-ui:
         condition: service_started
     environment:
-      CONTROLLER_URL: http://freezer-controller:8080
+      CONTROLLER_URL: http://freezer-controller-a:8080
       GATEWAY_USER: gateway
       GATEWAY_PASSWORD: ${GATEWAY_PASSWORD:-gateway-demo-password}
-      MACULA_STATION_SEEDS: station:4433
+      MACULA_STATION_SEEDS: station-a:4433
       MCL_SERVICE_NAME: mcl-ot-gateway
-      MCL_BOX: warehouses-lab
-      MESH_CONFIG_PATH: /mesh/realm.json
+      MCL_BOX: warehouse-a
+      MESH_CONFIG_PATH: /mesh/realm-a.json
       MESH_OPERATOR_NODE_ID_PATH: /mesh/operator-node-id
     volumes:
       - ./generated:/mesh
-      - gateway_secrets:/etc/mcl/secrets
+      - gateway_secrets_a:/etc/mcl/secrets
     networks:
       - mesh_net
-      - ot_net
+      - site_a_net
+    pids_limit: 4096
+    restart: unless-stopped
+
+  ot-gateway-b:
+    build:
+      context: ../apps/ot_gateway
+      dockerfile: Containerfile
+    image: warehouses-demo/ot-gateway:dev
+    pull_policy: build
+    depends_on:
+      station-b:
+        condition: service_started
+      ot-realm-fixture:
+        condition: service_started
+      freezer-controller-b:
+        condition: service_healthy
+      admin-ui:
+        condition: service_started
+    environment:
+      CONTROLLER_URL: http://freezer-controller-b:8080
+      GATEWAY_USER: gateway
+      GATEWAY_PASSWORD: ${GATEWAY_PASSWORD:-gateway-demo-password}
+      MACULA_STATION_SEEDS: station-b:4433
+      MCL_SERVICE_NAME: mcl-ot-gateway
+      MCL_BOX: warehouse-b
+      MESH_CONFIG_PATH: /mesh/realm-b.json
+      MESH_OPERATOR_NODE_ID_PATH: /mesh/operator-node-id
+    volumes:
+      - ./generated:/mesh
+      - gateway_secrets_b:/etc/mcl/secrets
+    networks:
+      - mesh_net
+      - site_b_net
     pids_limit: 4096
     restart: unless-stopped
 
@@ -121,7 +225,6 @@ services:
     image: warehouses-demo/admin-ui:dev
     pull_policy: build
     environment:
-      LEGACY_EDGE_URL: http://127.0.0.1:9
       PHX_SERVER: "true"
       PHX_HOST: localhost
       PORT: "4000"
@@ -129,7 +232,7 @@ services:
       MESH_CONFIG_PATH: /mesh/realm.json
       MESH_IDENTITY_PATH: /data/operator.key
       MESH_OPERATOR_NODE_ID_PATH: /mesh/operator-node-id
-      MESH_STATION_SEEDS: station:4433
+      MESH_STATION_SEEDS: station-a:4433
     volumes:
       - ./generated:/mesh
       - operator_data:/data
@@ -149,13 +252,21 @@ services:
 networks:
   mesh_net:
     internal: true
-  ot_net:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+  site_a_net:
+    internal: true
+  site_b_net:
     internal: true
   ui_net:
 
 volumes:
-  station_home:
-  station_data:
+  station_a_home:
+  station_a_data:
+  station_b_home:
+  station_b_data:
   realm_data:
-  gateway_secrets:
+  gateway_secrets_a:
+  gateway_secrets_b:
   operator_data:

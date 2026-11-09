@@ -44,10 +44,10 @@ defmodule AdminUiWeb.Layouts do
             </span>
             <span>
               <span class="block text-sm font-semibold tracking-tight text-white">
-                Cold Chain Control
+                Warehouses on mesh
               </span>
               <span class="block text-[10px] uppercase tracking-[0.25em] text-slate-500">
-                OT security lab
+                Federated OT lab
               </span>
             </span>
           </a>

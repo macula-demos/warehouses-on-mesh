@@ -35,8 +35,11 @@ defmodule FreezerController.FreezerSimulator do
 
   @impl true
   def init(_opts) do
+    site_id = site_id()
+
     state = %{
-      freezers: initial_freezers(),
+      freezers: initial_freezers(site_id),
+      site_id: site_id,
       speed: env_float("SIM_SPEED", @default_speed),
       last_tick_ms: now_ms()
     }
@@ -92,7 +95,7 @@ defmodule FreezerController.FreezerSimulator do
   end
 
   def handle_call(:reset, _from, state) do
-    {:reply, :ok, %{state | freezers: initial_freezers(), last_tick_ms: now_ms()}}
+    {:reply, :ok, %{state | freezers: initial_freezers(state.site_id), last_tick_ms: now_ms()}}
   end
 
   @impl true
@@ -188,10 +191,18 @@ defmodule FreezerController.FreezerSimulator do
   defp default_target(:frozen), do: -18.0
   defp default_target(:chilled), do: 4.0
 
-  defp initial_freezers do
+  defp site_id do
+    case System.get_env("SITE_ID", "A") do
+      "" -> "A"
+      value -> value
+    end
+  end
+
+  defp initial_freezers(site_id) do
     [
       %Freezer{
-        id: "FZ-01",
+        id: "FZ-#{site_id}1",
+        site_id: site_id,
         name: "Frozen aisle 1",
         kind: :frozen,
         current_c: -18.0,
@@ -201,7 +212,8 @@ defmodule FreezerController.FreezerSimulator do
         stock_value_eur: 15_000
       },
       %Freezer{
-        id: "FZ-02",
+        id: "FZ-#{site_id}2",
+        site_id: site_id,
         name: "Chilled aisle 1",
         kind: :chilled,
         current_c: 3.5,
@@ -211,7 +223,8 @@ defmodule FreezerController.FreezerSimulator do
         stock_value_eur: 8_500
       },
       %Freezer{
-        id: "FZ-03",
+        id: "FZ-#{site_id}3",
+        site_id: site_id,
         name: "Frozen aisle 2",
         kind: :frozen,
         current_c: -19.2,
@@ -221,7 +234,8 @@ defmodule FreezerController.FreezerSimulator do
         stock_value_eur: 12_000
       },
       %Freezer{
-        id: "FZ-04",
+        id: "FZ-#{site_id}4",
+        site_id: site_id,
         name: "Butcher display",
         kind: :chilled,
         current_c: 2.0,

@@ -7,8 +7,6 @@ config :admin_ui, AdminUiWeb.Endpoint,
   secret_key_base: "AJNgaQC7p73e1lAyiOZgSJN5TZltjvYyNyYBV0GmHeLPb2RDss9J/Dfak8LD2zEd",
   server: false
 
-config :admin_ui, legacy_edge_url: "http://127.0.0.1:1"
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 

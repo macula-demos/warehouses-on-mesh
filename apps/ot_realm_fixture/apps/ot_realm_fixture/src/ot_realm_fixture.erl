@@ -16,8 +16,12 @@
 -define(REALM_NAME, <<"io.macula.otlab">>).
 -define(CLAIM_PROCEDURE,
         <<"io.macula/_realm/_realm/identity/request_provider_authorization_v1">>).
--define(STATION_HOST, <<"station">>).
 -define(STATION_PORT, 4433).
+%% One fixture, two stations: it holds a link to each site's station and
+%% advertises the boot-claim procedure on both, so each gateway's claim is
+%% served by its local station. The fixture is realm infrastructure, not a
+%% site component; it is the one node that deliberately spans both sites.
+-define(STATIONS, [{<<"A">>, <<"station-a">>}, {<<"B">>, <<"station-b">>}]).
 
 -record(state, {
     pool :: pid(),
@@ -69,7 +73,7 @@ terminate(_Reason, #state{claim_sup = Sup}) when is_pid(Sup) ->
 %%%===================================================================
 
 setup() ->
-    StationNodeId = read_station_node_id(),
+    Stations = read_station_node_ids(),
     DataDir = "/data",
     ok = filelib:ensure_dir(filename:join(DataDir, "x")),
 
@@ -83,13 +87,13 @@ setup() ->
     Realm = crypto:hash(sha256, ?REALM_NAME),
     RealmPub = macula_node_keys:public_key(RealmKey),
 
-    case connect(IdentityKey, Realm, RealmPub, StationNodeId) of
+    case connect(IdentityKey, Realm, RealmPub, Stations) of
         {ok, Pool} ->
             _ = erlang:monitor(process, Pool),
-            case wait_healthy(Pool, 100) of
+            case wait_healthy(Pool, length(Stations), 200) of
                 ok ->
                     publish_chain(Pool, Realm, RealmKey, IoOrgKey, FixtureNodeId,
-                                  OtOrgKey, IdentityKey, StationNodeId);
+                                  OtOrgKey, IdentityKey, Stations);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -97,16 +101,17 @@ setup() ->
             {error, Reason}
     end.
 
-connect(IdentityKey, Realm, RealmPub, StationNodeId) ->
-    Seeds = [#{host => ?STATION_HOST,
+connect(IdentityKey, Realm, RealmPub, Stations) ->
+    Seeds = [#{host => Host,
                port => ?STATION_PORT,
-               expected_node_id => StationNodeId}],
+               expected_node_id => StationNodeId}
+             || {_Site, Host, StationNodeId} <- Stations],
     Opts = #{node_identity => IdentityKey,
              realm_trust => #{Realm => RealmPub}},
     macula_client:connect(Seeds, Opts).
 
 publish_chain(Pool, Realm, RealmKey, IoOrgKey, FixtureNodeId, OtOrgKey, IdentityKey,
-              StationNodeId) ->
+              Stations) ->
     {ok, IoDirectory} =
         publish_org_directory(Pool, Realm, RealmKey, <<"io.macula">>, IoOrgKey),
     {ok, _OtDirectory} =
@@ -125,9 +130,9 @@ publish_chain(Pool, Realm, RealmKey, IoOrgKey, FixtureNodeId, OtOrgKey, Identity
            Pool, Realm, ?CLAIM_PROCEDURE, ot_realm_claim_handler,
            HandlerState, IdentityKey, #{auth => open, authorization => Authorization}) of
         {ok, ClaimSup} ->
-            ok = write_realm_file(Realm, realm_public_key(RealmKey), StationNodeId),
-            logger:notice("ot_realm_fixture ready: realm=~s station=~s",
-                          [hex(Realm), hex(StationNodeId)]),
+            ok = write_realm_files(Realm, realm_public_key(RealmKey), Stations),
+            logger:notice("ot_realm_fixture ready: realm=~s stations=~s",
+                          [hex(Realm), station_hex_list(Stations)]),
             {ok, #state{pool = Pool,
                         realm = Realm,
                         ot_org_key = OtOrgKey,
@@ -154,15 +159,15 @@ sign_delegation(OrgKey, ProviderNodeId) ->
 publish_record(Pool, Record) ->
     macula:put_record(Pool, macula_record:encode(Record)).
 
-wait_healthy(_Pool, 0) ->
+wait_healthy(_Pool, _Wanted, 0) ->
     {error, station_unhealthy};
-wait_healthy(Pool, Attempts) ->
+wait_healthy(Pool, Wanted, Attempts) ->
     case macula_client:status(Pool) of
-        {ok, #{healthy_links := Links}} when Links > 0 ->
+        {ok, #{healthy_links := Links}} when Links >= Wanted ->
             ok;
         _Other ->
             timer:sleep(100),
-            wait_healthy(Pool, Attempts - 1)
+            wait_healthy(Pool, Wanted, Attempts - 1)
     end.
 
 %%%===================================================================
@@ -181,12 +186,15 @@ load_or_generate(Path, Purpose) ->
             error({key_load_failed, Path, Reason})
     end.
 
-read_station_node_id() ->
-    Path = "/mesh/station-node-id",
+read_station_node_ids() ->
+    [read_station_node_id(Site, Host) || {Site, Host} <- ?STATIONS].
+
+read_station_node_id(Site, Host) ->
+    Path = "/mesh/" ++ binary_to_list(Host) ++ "-node-id",
     case wait_for_file(Path, 120) of
         ok ->
             {ok, Bin} = file:read_file(Path),
-            hex_to_bin(string:trim(binary_to_list(Bin)));
+            {Site, Host, hex_to_bin(string:trim(binary_to_list(Bin)))};
         {error, Reason} ->
             error(Reason)
     end.
@@ -202,15 +210,31 @@ wait_for_file(Path, Attempts) ->
             wait_for_file(Path, Attempts - 1)
     end.
 
-write_realm_file(Realm, RealmPub, StationNodeId) ->
+write_realm_files(Realm, RealmPub, Stations) ->
+    StationMap = maps:from_list([{Site, hex(NodeId)} || {Site, _Host, NodeId} <- Stations]),
+    [A, B] = [hex(NodeId) || {_Site, _Host, NodeId} <- Stations],
+    Files = [
+        {"/mesh/realm.json", A},
+        {"/mesh/realm-a.json", A},
+        {"/mesh/realm-b.json", B}
+    ],
+    [write_realm_file(Path, Realm, RealmPub, StationId, StationMap) || {Path, StationId} <- Files],
+    ok.
+
+write_realm_file(Path, Realm, RealmPub, StationNodeId, StationMap) ->
     Json = jsx:encode(#{
         <<"realm">> => hex(Realm),
         <<"realm_key">> => hex(RealmPub),
-        <<"station_node_id">> => hex(StationNodeId)
+        <<"station_node_id">> => StationNodeId,
+        <<"stations">> => StationMap
     }),
-    Tmp = "/mesh/realm.json.tmp",
+    Tmp = Path ++ ".tmp",
     ok = file:write_file(Tmp, Json),
-    ok = file:rename(Tmp, "/mesh/realm.json").
+    ok = file:rename(Tmp, Path).
+
+station_hex_list(Stations) ->
+    iolist_to_binary(lists:join(",", [<<Site/binary, "=", (hex(NodeId))/binary>>
+                                      || {Site, _Host, NodeId} <- Stations])).
 
 hex(Bin) ->
     binary:encode_hex(Bin, lowercase).

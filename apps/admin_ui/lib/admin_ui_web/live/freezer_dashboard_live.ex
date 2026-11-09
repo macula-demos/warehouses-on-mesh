@@ -1,7 +1,6 @@
 defmodule AdminUiWeb.FreezerDashboardLive do
   use AdminUiWeb, :live_view
 
-  alias AdminUi.LegacyController
   alias AdminUi.MeshClient
 
   @tick_ms 1_000
@@ -9,101 +8,91 @@ defmodule AdminUiWeb.FreezerDashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    base_url = Application.get_env(:admin_ui, :legacy_edge_url, "http://localhost:8080")
+    snapshot = MeshClient.snapshot()
 
     socket =
       socket
-      |> assign(:page_title, "Cold Chain Control")
-      # This lab has no legacy edge: the retrofit is assumed done at both
-      # sites. Start on the mesh path so a dead legacy URL never blocks the
-      # LiveView's mailbox.
-      |> assign(:mode, :mesh)
-      |> assign(:base_url, base_url)
-      |> assign(:auth, nil)
-      |> assign(:login_form, to_form(%{"username" => "admin", "password" => "admin"}, as: :login))
+      |> assign(:page_title, "Warehouses on mesh")
+      |> assign(:selected_site, "A")
+      |> assign(:snapshot, snapshot)
+      |> assign(:sites, snapshot.sites)
+      |> assign(:providers, snapshot.providers)
+      |> assign(:station_ids, snapshot.station_ids)
+      |> assign(:version, snapshot.version)
+      |> assign(:display_version, -1)
+      |> assign(:mesh_ready?, snapshot.status == :connected)
+      |> assign(:operator_node_id, snapshot.operator_node_id)
+      |> assign(:stranger_node_id, snapshot.stranger_node_id)
+      |> assign(:report_override, nil)
+      |> assign(:last_report, nil)
+      |> assign(:last_action, nil)
+      |> assign(:error, snapshot.last_error)
       |> assign(:readings, %{})
-      |> assign(:freezer_count, 0)
-      |> assign(:audit_count, 0)
-      |> assign(:gateway_audit_count, 0)
-      |> assign(:last_refresh_ms, nil)
-      |> assign(:error, nil)
-      |> assign(:attack_result, nil)
-      |> assign(:mesh_ready?, MeshClient.status() == :connected)
-      |> assign(:operator_node_id, MeshClient.operator_node_id())
-      |> assign(:seal_report, nil)
+      |> assign(:selected_freezers, [])
+      |> assign(:selected_audit, [])
       |> stream(:freezers, [], dom_id: &"freezer-#{&1["id"]}")
-      |> stream(:audit, [], dom_id: &"audit-#{&1["id"]}")
       |> stream(:gateway_audit, [], dom_id: &"gateway-audit-#{&1["id"]}")
 
     if connected?(socket), do: Process.send_after(self(), :tick, 0)
 
-    {:ok, refresh(socket)}
+    {:ok, socket}
   end
 
   @impl true
   def handle_info(:tick, socket) do
-    socket = refresh(socket)
+    socket = refresh_from_snapshot(socket, MeshClient.snapshot())
     Process.send_after(self(), :tick, @tick_ms)
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("switch_mode", %{"mode" => "legacy"}, socket) do
-    {:noreply, socket |> assign(:mode, :legacy) |> refresh()}
-  end
+  def handle_event("switch_site", %{"site" => site}, socket) when site in ["A", "B"] do
+    socket =
+      socket
+      |> assign(:selected_site, site)
+      |> assign(:display_version, -1)
+      |> assign(:report_override, nil)
+      |> assign(:last_action, nil)
+      |> refresh_from_snapshot(MeshClient.snapshot())
 
-  def handle_event("switch_mode", %{"mode" => "mesh"}, socket) do
-    if MeshClient.status() == :connected do
-      {:noreply, socket |> assign(:mode, :mesh) |> refresh()}
-    else
-      {:noreply,
-       put_flash(
-         socket,
-         :error,
-         "The mesh client is not connected yet. Check the station and the gateway."
-       )}
-    end
-  end
-
-  def handle_event("login", %{"login" => %{"username" => user, "password" => password}}, socket) do
-    case LegacyController.login(socket.assigns.base_url, user, password) do
-      {:ok, signed_in} ->
-        {:noreply,
-         socket
-         |> assign(:auth, %{user: user, password: password})
-         |> put_flash(
-           :info,
-           "Signed in as #{signed_in}. This login is a UI gate; the controller API is still directly reachable."
-         )}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Login failed: #{reason}")}
-    end
-  end
-
-  def handle_event("logout", _params, socket) do
-    {:noreply, socket |> assign(:auth, nil) |> put_flash(:info, "Signed out of the UI.")}
+    {:noreply, socket}
   end
 
   def handle_event("set_target", %{"id" => id, "target" => target}, socket) do
     case Float.parse(target) do
-      {target_c, ""} -> write_target(socket, id, target_c)
-      _ -> {:noreply, put_flash(socket, :error, "Invalid target temperature.")}
+      {target_c, ""} ->
+        case MeshClient.set_freezer_target(socket.assigns.selected_site, id, target_c) do
+          {:ok, freezer, report} ->
+            write_ok(
+              socket,
+              freezer,
+              report,
+              "Gateway accepted #{id} target #{target_c}°C (sealed)."
+            )
+
+          {:error, reason} ->
+            write_error(socket, reason)
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Invalid target temperature.")}
     end
   end
 
   def handle_event("start_defrost", %{"id" => id}, socket) do
-    write_defrost(socket, id, :start)
+    case MeshClient.start_defrost(socket.assigns.selected_site, id) do
+      {:ok, freezer, report} ->
+        write_ok(socket, freezer, report, "Started defrost on #{id} (sealed).")
+
+      {:error, reason} ->
+        write_error(socket, reason)
+    end
   end
 
   def handle_event("stop_defrost", %{"id" => id}, socket) do
-    write_defrost(socket, id, :stop)
-  end
-
-  def handle_event("replay_last", _params, %{assigns: %{mode: :mesh}} = socket) do
-    case MeshClient.replay_last() do
-      {:ok, freezer, _report} ->
-        write_ok(socket, freezer, "Replayed command accepted (unexpected).")
+    case MeshClient.stop_defrost(socket.assigns.selected_site, id) do
+      {:ok, freezer, report} ->
+        write_ok(socket, freezer, report, "Stopped defrost on #{id} (sealed).")
 
       {:error, reason} ->
         write_error(socket, reason)
@@ -111,284 +100,147 @@ defmodule AdminUiWeb.FreezerDashboardLive do
   end
 
   def handle_event("replay_last", _params, socket) do
-    {:noreply, put_flash(socket, :error, "Replay is only available in Mesh mode.")}
-  end
-
-  def handle_event("stranger_write", _params, %{assigns: %{mode: :mesh}} = socket) do
-    case MeshClient.stranger_set_target("FZ-01", 60.0) do
-      {:ok, freezer, _report} ->
-        write_ok(socket, freezer, "Stranger write accepted (unexpected).")
+    case MeshClient.replay_last() do
+      {:ok, freezer, report} ->
+        write_ok(socket, freezer, report, "Replayed command accepted (unexpected).")
 
       {:error, reason} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "Stranger #{short_id(MeshClient.stranger_node_id())} refused: #{format_reason(reason)}"
-         )}
+        output =
+          socket
+          |> put_flash(:error, "Command refused: #{format_reason(reason)}")
+          |> assign(:last_action, "replay")
+          |> assign(:last_report, nil)
+
+        MeshClient.refresh_now()
+        {:noreply, output}
     end
   end
 
   def handle_event("stranger_write", _params, socket) do
-    {:noreply, put_flash(socket, :error, "The stranger probe is only available in Mesh mode.")}
-  end
+    case stranger_target(socket.assigns.sites, socket.assigns.selected_site) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Site B has not resolved a provider yet.")}
 
-  def handle_event("attack_read", _params, socket) do
-    case LegacyController.list_freezers(socket.assigns.base_url) do
-      {:ok, freezers} ->
-        {:noreply,
-         assign(socket, :attack_result, %{
-           kind: :success,
-           text: "Read #{length(freezers)} freezers with no credentials. The controller answered."
-         })}
+      {site, freezer} ->
+        case MeshClient.stranger_set_target(site, freezer["id"], 60.0) do
+          {:ok, freezer, report} ->
+            write_ok(socket, freezer, report, "Stranger write accepted (unexpected).")
 
-      {:error, reason} ->
-        {:noreply,
-         assign(socket, :attack_result, %{kind: :error, text: "Read failed: #{reason}"})}
+          {:error, reason} ->
+            output =
+              socket
+              |> put_flash(
+                :error,
+                "Stranger #{short_id(MeshClient.stranger_node_id())} on site #{site} refused: #{format_reason(reason)}"
+              )
+              |> assign(:last_action, "stranger")
+              |> assign(:last_report, nil)
+
+            MeshClient.refresh_now()
+            {:noreply, output}
+        end
     end
   end
 
-  def handle_event("attack_set_target", _params, socket) do
-    case LegacyController.set_target(socket.assigns.base_url, "admin", "admin", "FZ-01", 50) do
-      {:ok, _freezer} ->
-        {:noreply,
-         socket
-         |> assign(:attack_result, %{
-           kind: :success,
-           text: "Set FZ-01 to +50°C using the default admin/admin credentials."
-         })
-         |> refresh()}
+  defp refresh_from_snapshot(socket, snapshot) do
+    selected_site = socket.assigns.selected_site
+    selected = Map.get(snapshot.sites, selected_site)
+    version_changed? = snapshot.version != socket.assigns.display_version
 
-      {:error, reason} ->
-        {:noreply,
-         assign(socket, :attack_result, %{kind: :error, text: "Attack failed: #{reason}"})}
-    end
-  end
+    socket =
+      socket
+      |> assign(:snapshot, snapshot)
+      |> assign(:sites, snapshot.sites)
+      |> assign(:providers, snapshot.providers)
+      |> assign(:station_ids, snapshot.station_ids)
+      |> assign(:version, snapshot.version)
+      |> assign(:mesh_ready?, snapshot.status == :connected)
+      |> assign(:operator_node_id, snapshot.operator_node_id)
+      |> assign(:stranger_node_id, snapshot.stranger_node_id)
+      |> assign(:error, snapshot.last_error)
 
-  def handle_event("attack_defrost", _params, socket) do
-    case LegacyController.start_defrost(socket.assigns.base_url, "admin", "admin", "FZ-01") do
-      {:ok, _freezer} ->
-        {:noreply,
-         socket
-         |> assign(:attack_result, %{
-           kind: :success,
-           text: "Forced FZ-01 into defrost with the default admin/admin credentials."
-         })
-         |> refresh()}
+    if version_changed? do
+      reset? = socket.assigns.display_version == -1
+      freezers = if selected, do: selected.freezers, else: []
+      audit = if selected, do: selected.audit, else: []
 
-      {:error, reason} ->
-        {:noreply,
-         assign(socket, :attack_result, %{kind: :error, text: "Attack failed: #{reason}"})}
-    end
-  end
-
-  def handle_event("reset_lab", _params, socket) do
-    case LegacyController.reset(socket.assigns.base_url, "admin", "admin") do
-      {:ok, _body} ->
-        {:noreply,
-         socket
-         |> assign(:attack_result, %{kind: :success, text: "Lab reset to safe temperatures."})
-         |> refresh()}
-
-      {:error, reason} ->
-        {:noreply,
-         assign(socket, :attack_result, %{kind: :error, text: "Reset failed: #{reason}"})}
-    end
-  end
-
-  def handle_event("dismiss_attack", _params, socket) do
-    {:noreply, assign(socket, :attack_result, nil)}
-  end
-
-  defp write_target(%{assigns: %{mode: :mesh}} = socket, id, target_c) do
-    case MeshClient.set_freezer_target(id, target_c) do
-      {:ok, freezer, _report} ->
-        write_ok(socket, freezer, "Gateway accepted #{id} target #{target_c}°C (sealed).")
-
-      {:error, reason} ->
-        write_error(socket, reason)
-    end
-  end
-
-  defp write_target(%{assigns: %{mode: :legacy}} = socket, id, target_c) do
-    with %{user: user, password: password} <- socket.assigns.auth do
-      case LegacyController.set_target(socket.assigns.base_url, user, password, id, target_c) do
-        {:ok, freezer} -> write_ok(socket, freezer, "Set #{id} target to #{target_c}°C.")
-        {:error, reason} -> write_error(socket, reason)
-      end
-    else
-      nil -> sign_in_required(socket)
-    end
-  end
-
-  defp write_defrost(%{assigns: %{mode: :mesh}} = socket, id, action) do
-    result =
-      case action do
-        :start -> MeshClient.start_defrost(id)
-        :stop -> MeshClient.stop_defrost(id)
-      end
-
-    case result do
-      {:ok, freezer, _report} ->
-        write_ok(socket, freezer, "#{action_label(action)} #{id} via the gateway (sealed).")
-
-      {:error, reason} ->
-        write_error(socket, reason)
-    end
-  end
-
-  defp write_defrost(%{assigns: %{mode: :legacy}} = socket, id, action) do
-    with %{user: user, password: password} <- socket.assigns.auth do
-      result =
-        case action do
-          :start -> LegacyController.start_defrost(socket.assigns.base_url, user, password, id)
-          :stop -> LegacyController.stop_defrost(socket.assigns.base_url, user, password, id)
+      report =
+        cond do
+          socket.assigns.report_override -> socket.assigns.report_override
+          selected -> selected.report
+          true -> nil
         end
 
-      case result do
-        {:ok, freezer} -> write_ok(socket, freezer, "#{action_label(action)} #{id}.")
-        {:error, reason} -> write_error(socket, reason)
-      end
+      socket =
+        socket
+        |> assign(:display_version, snapshot.version)
+        |> assign(:selected_freezers, freezers)
+        |> assign(:selected_audit, audit)
+        |> assign(:last_report, report)
+        |> assign(:readings, update_readings(socket.assigns.readings, freezers))
+        |> put_freezers(freezers, reset?)
+        |> put_audit(audit)
+
+      socket
     else
-      nil -> sign_in_required(socket)
+      socket
     end
   end
 
-  defp action_label(:start), do: "Started defrost on"
-  defp action_label(:stop), do: "Stopped defrost on"
-
-  defp writes_enabled?(:legacy, auth, _mesh_ready?), do: not is_nil(auth)
-  defp writes_enabled?(:mesh, _auth, mesh_ready?), do: mesh_ready?
-
-  defp short_id(nil), do: "—"
-
-  defp short_id(id) when is_binary(id) do
-    if String.length(id) > 12, do: String.slice(id, 0, 12) <> "…", else: id
+  defp put_freezers(socket, freezers, reset?) do
+    if reset? do
+      stream(socket, :freezers, freezers, reset: true)
+    else
+      Enum.reduce(freezers, socket, fn freezer, acc ->
+        stream_insert(acc, :freezers, freezer)
+      end)
+    end
   end
 
-  defp short_id(other), do: inspect(other)
+  defp put_audit(socket, commands) do
+    commands =
+      commands
+      |> Enum.with_index()
+      |> Enum.map(fn {command, index} ->
+        Map.put(command, "id", "#{command["command_id"]}-#{index}")
+      end)
 
-  defp write_ok(socket, freezer, message) do
+    stream(socket, :gateway_audit, commands, reset: true)
+  end
+
+  defp write_ok(socket, freezer, report, message) do
     {:noreply,
      socket
      |> stream_insert(:freezers, freezer)
-     |> refresh()
+     |> assign(:report_override, report)
+     |> assign(:last_action, message)
+     |> assign(:last_report, report)
      |> put_flash(:info, message)}
   end
 
   defp write_error(socket, reason) do
-    {:noreply, put_flash(socket, :error, "Command refused: #{format_reason(reason)}")}
-  end
-
-  defp sign_in_required(socket) do
-    {:noreply,
-     put_flash(
-       socket,
-       :error,
-       "Sign in first. The controller uses one shared password for writes."
-     )}
-  end
-
-  defp format_reason(:command_replayed),
-    do: "command_replayed (the gateway already saw this command id)"
-
-  defp format_reason(:command_expired),
-    do: "command_expired (the command timestamp is outside the gateway window)"
-
-  defp format_reason({:call_error, "unauthorized", _detail}),
-    do: "unauthorized (this node is not on the gateway's operator list)"
-
-  defp format_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
-  defp format_reason(reason) when is_binary(reason), do: reason
-  defp format_reason(reason), do: inspect(reason)
-
-  defp refresh(socket) do
-    socket =
+    output =
       socket
-      |> assign(:mesh_ready?, MeshClient.status() == :connected)
-      |> assign(:operator_node_id, MeshClient.operator_node_id())
+      |> put_flash(:error, "Command refused: #{format_reason(reason)}")
+      |> assign(:last_action, "refused")
+      |> assign(:last_report, nil)
 
-    case socket.assigns.mode do
-      :legacy -> refresh_legacy(socket)
-      :mesh -> refresh_mesh(socket)
-    end
+    MeshClient.refresh_now()
+    {:noreply, output}
   end
 
-  defp refresh_legacy(socket) do
-    case LegacyController.list_freezers(socket.assigns.base_url) do
-      {:ok, freezers} ->
-        socket =
-          socket
-          |> assign(:freezer_count, length(freezers))
-          |> assign(:readings, update_readings(socket.assigns.readings, freezers))
-          |> assign(:last_refresh_ms, System.system_time(:millisecond))
-          |> assign(:error, nil)
-          |> put_freezers(freezers)
+  defp stranger_target(sites, fallback_site) do
+    preferred =
+      case Map.get(sites, "B") do
+        %{freezers: [freezer | _]} -> {"B", freezer}
+        _ -> nil
+      end
 
-        refresh_audit(socket)
-
-      {:error, reason} ->
-        assign(socket, :error, reason)
-    end
-  end
-
-  defp refresh_mesh(socket) do
-    case MeshClient.list_freezers() do
-      {:ok, freezers, report} ->
-        socket
-        |> assign(:freezer_count, length(freezers))
-        |> assign(:readings, update_readings(socket.assigns.readings, freezers))
-        |> assign(:last_refresh_ms, System.system_time(:millisecond))
-        |> assign(:error, nil)
-        |> assign(:seal_report, report)
-        |> put_freezers(freezers)
-        |> refresh_gateway_audit()
-
-      {:error, reason} ->
-        assign(socket, :error, "mesh: #{inspect(reason)}")
-    end
-  end
-
-  defp refresh_gateway_audit(socket) do
-    case MeshClient.list_freezer_commands() do
-      {:ok, commands, _report} ->
-        commands =
-          commands
-          |> Enum.with_index()
-          |> Enum.map(fn {command, index} ->
-            Map.put(command, "id", "#{command["command_id"]}-#{index}")
-          end)
-
-        socket
-        |> assign(:gateway_audit_count, length(commands))
-        |> stream(:gateway_audit, commands, reset: true)
-
-      {:error, _reason} ->
-        socket
-    end
-  end
-
-  defp put_freezers(socket, freezers) do
-    Enum.reduce(freezers, socket, fn freezer, acc ->
-      stream_insert(acc, :freezers, freezer)
-    end)
-  end
-
-  defp refresh_audit(socket) do
-    case LegacyController.list_audit(socket.assigns.base_url) do
-      {:ok, entries} ->
-        entries =
-          entries
-          |> Enum.with_index()
-          |> Enum.map(fn {entry, index} -> Map.put(entry, "id", "#{entry["at_ms"]}-#{index}") end)
-
-        socket
-        |> assign(:audit_count, length(entries))
-        |> stream(:audit, entries, reset: true)
-
-      {:error, _reason} ->
-        socket
-    end
+    preferred ||
+      case Map.get(sites, fallback_site) do
+        %{freezers: [freezer | _]} -> {fallback_site, freezer}
+        _ -> nil
+      end
   end
 
   defp update_readings(readings, freezers) do
@@ -398,6 +250,64 @@ defmodule AdminUiWeb.FreezerDashboardLive do
       Map.put(acc, id, Enum.take([freezer["current_c"] | history], @history_points))
     end)
   end
+
+  defp format_reason(:command_replayed),
+    do: "command_replayed (the gateway already saw this command id)"
+
+  defp format_reason(:command_expired),
+    do: "command_expired (the command timestamp is outside the gateway window)"
+
+  defp format_reason(:site_unresolved),
+    do: "the site has not resolved a provider yet"
+
+  defp format_reason({:call_error, "command_replayed", _detail}),
+    do: "command_replayed (the gateway already saw this command id)"
+
+  defp format_reason({:call_error, "command_expired", _detail}),
+    do: "command_expired (the command timestamp is outside the gateway window)"
+
+  defp format_reason({:call_error, "unauthorized", _detail}),
+    do: "unauthorized (this node is not on the gateway's operator list)"
+
+  defp format_reason({:call_error, reason, _detail}) when is_binary(reason), do: reason
+
+  defp format_reason({:unresolved, reason}),
+    do: "no trusted provider (#{format_reason(reason)})"
+
+  defp format_reason({:dial_refused, reason}),
+    do: "dial refused (#{reason})"
+
+  defp format_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
+
+  defp short_id(nil), do: "—"
+
+  defp short_id(id) when is_binary(id) do
+    if String.length(id) > 12, do: String.slice(id, 0, 12) <> "…", else: id
+  end
+
+  defp short_id(other), do: inspect(other)
+
+  defp format_time(nil), do: "—"
+
+  defp format_time(ms) when is_integer(ms) do
+    ms
+    |> DateTime.from_unix!(:millisecond)
+    |> Calendar.strftime("%H:%M:%S")
+  end
+
+  defp format_report(nil), do: "—"
+
+  defp format_report(report) when is_map(report) do
+    sealed = if Map.get(report, :sealed, 0) == 1, do: "sealed", else: "clear"
+    provider = report |> Map.get(:provider) |> hex()
+    key = report |> Map.get(:seal_key_id) |> hex()
+    "#{sealed} · provider #{provider} · key #{key}"
+  end
+
+  defp hex(bin) when is_binary(bin), do: Base.encode16(bin, case: :lower)
+  defp hex(_other), do: "—"
 
   defp alarm_label("ok"), do: "nominal"
   defp alarm_label("at_risk"), do: "at risk"
@@ -421,33 +331,22 @@ defmodule AdminUiWeb.FreezerDashboardLive do
   defp sparkline_class("spoiled"), do: "text-red-400/80"
   defp sparkline_class(_), do: "text-emerald-400/70"
 
-  defp attack_result_class(:success), do: "border-red-400/30 bg-red-500/10 text-red-100"
-  defp attack_result_class(:error), do: "border-slate-600/30 bg-slate-800/40 text-slate-300"
-
   defp mode_label("cooling"), do: "cooling"
   defp mode_label("defrost"), do: "defrost"
   defp mode_label("off"), do: "off"
   defp mode_label(other), do: other
 
-  defp format_time(nil), do: "—"
+  defp site_label("A"), do: "Site A"
+  defp site_label("B"), do: "Site B"
+  defp site_label(_), do: "Site —"
 
-  defp format_time(ms) when is_integer(ms) do
-    ms
-    |> DateTime.from_unix!(:millisecond)
-    |> Calendar.strftime("%H:%M:%S")
-  end
+  defp site_path("A"), do: "local station"
+  defp site_path("B"), do: "via relay"
+  defp site_path(_), do: "unresolved"
 
-  defp format_report(report) when is_map(report) do
-    sealed = if Map.get(report, :sealed, 0) == 1, do: "sealed", else: "clear"
-    provider = report |> Map.get(:provider) |> hex()
-    key = report |> Map.get(:seal_key_id) |> hex()
-    "#{sealed} · provider #{provider} · key #{key}"
-  end
-
-  defp format_report(_other), do: nil
-
-  defp hex(bin) when is_binary(bin), do: Base.encode16(bin, case: :lower)
-  defp hex(_other), do: "—"
+  defp site_badge("A"), do: "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+  defp site_badge("B"), do: "border-violet-500/30 bg-violet-500/10 text-violet-200"
+  defp site_badge(_), do: "border-slate-700 bg-slate-800 text-slate-400"
 
   defp sparkline_points([]), do: "0,16 120,16"
 
@@ -534,6 +433,49 @@ defmodule AdminUiWeb.FreezerDashboardLive do
   defp posture_value(:warning), do: "text-amber-200"
   defp posture_value(:success), do: "text-emerald-200"
 
+  attr :site_id, :string, required: true
+  attr :provider, :string, default: nil
+  attr :station, :string, default: nil
+  attr :freezers, :list, default: []
+  attr :selected?, :boolean, default: false
+
+  defp site_card(assigns) do
+    ~H"""
+    <button
+      phx-click="switch_site"
+      phx-value-site={@site_id}
+      class={[
+        "w-full rounded-2xl border p-4 text-left transition",
+        if(@selected?,
+          do: "border-cyan-400/40 bg-cyan-500/10 shadow-lg shadow-cyan-500/5",
+          else: "border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900"
+        )
+      ]}
+    >
+      <div class="flex items-center justify-between gap-3">
+        <span class={[
+          "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+          site_badge(@site_id)
+        ]}>
+          {site_label(@site_id)}
+        </span>
+        <span class="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+          {site_path(@site_id)}
+        </span>
+      </div>
+      <p class="mt-3 text-2xl font-semibold tracking-tight text-white">
+        {length(@freezers)}<span class="ml-1 text-xs font-normal text-slate-500">freezers</span>
+      </p>
+      <p class="mt-2 font-mono text-[10px] text-slate-500">
+        gateway {@provider || "resolving provider…"}
+      </p>
+      <p class="mt-1 font-mono text-[10px] text-slate-600">
+        station {@station || "—"}
+      </p>
+    </button>
+    """
+  end
+
   attr :freezer, :map, required: true
   attr :readings, :list, required: true
   attr :writes_enabled?, :boolean, default: false
@@ -611,10 +553,6 @@ defmodule AdminUiWeb.FreezerDashboardLive do
           Stop
         </button>
       </div>
-
-      <p :if={!@writes_enabled?} class="mt-2 text-[10px] text-slate-600">
-        Sign in (Legacy mode) or wait for the Mesh client to enable write controls.
-      </p>
     </article>
     """
   end

@@ -22,7 +22,7 @@ defmodule FreezerController.RouterTest do
 
   test "a write without credentials is refused" do
     conn =
-      conn(:post, "/api/freezers/FZ-01/target", Jason.encode!(%{target_c: 50}))
+      conn(:post, "/api/freezers/FZ-A1/target", Jason.encode!(%{target_c: 50}))
       |> put_req_header("content-type", "application/json")
       |> call()
 
@@ -31,7 +31,7 @@ defmodule FreezerController.RouterTest do
 
   test "the default admin credentials can change a target" do
     conn =
-      conn(:post, "/api/freezers/FZ-01/target", Jason.encode!(%{target_c: 50}))
+      conn(:post, "/api/freezers/FZ-A1/target", Jason.encode!(%{target_c: 50}))
       |> put_req_header("content-type", "application/json")
       |> put_req_header("authorization", basic("admin", "admin"))
       |> call()
@@ -59,7 +59,7 @@ defmodule FreezerController.RouterTest do
 
   test "the audit log names the caller and the action" do
     _ =
-      conn(:post, "/api/freezers/FZ-01/target", Jason.encode!(%{target_c: 50}))
+      conn(:post, "/api/freezers/FZ-A1/target", Jason.encode!(%{target_c: 50}))
       |> put_req_header("content-type", "application/json")
       |> put_req_header("authorization", basic("admin", "admin"))
       |> call()
@@ -70,7 +70,7 @@ defmodule FreezerController.RouterTest do
     assert %{"entries" => [entry | _]} = Jason.decode!(conn.resp_body)
     assert entry["user"] == "admin"
     assert entry["action"] == "set_target"
-    assert entry["freezer_id"] == "FZ-01"
+    assert entry["freezer_id"] == "FZ-A1"
     assert entry["result"] == "ok"
   end
 
