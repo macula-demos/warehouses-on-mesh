@@ -11,6 +11,9 @@ STATION_A_IP="172.28.0.10"
 STATION_B_IP="172.28.0.11"
 
 mkdir -p "$GENERATED"
+rm -f "$GENERATED/operator-node-id" \
+      "$GENERATED/realm.json" "$GENERATED/realm-a.json" "$GENERATED/realm-b.json" \
+      "$GENERATED/relay.pcap"
 
 station_config() {
   local bind_ip="$1"
@@ -120,10 +123,10 @@ echo "Waiting for both gateways..."
 for _ in $(seq 1 180); do
   A_OK=0
   B_OK=0
-  "${COMPOSE[@]}" exec -T ot-gateway-a curl -fsS --unix-socket /run/mcl/health.sock \
-      http://localhost/health >/dev/null 2>&1 && A_OK=1 || true
-  "${COMPOSE[@]}" exec -T ot-gateway-b curl -fsS --unix-socket /run/mcl/health.sock \
-      http://localhost/health >/dev/null 2>&1 && B_OK=1 || true
+  "${COMPOSE[@]}" exec -T ot-gateway-a curl -sS --unix-socket /run/mcl/health.sock \
+      http://localhost/health 2>/dev/null | jq -e '.claim.state == "issued"' >/dev/null 2>&1 && A_OK=1 || true
+  "${COMPOSE[@]}" exec -T ot-gateway-b curl -sS --unix-socket /run/mcl/health.sock \
+      http://localhost/health 2>/dev/null | jq -e '.claim.state == "issued"' >/dev/null 2>&1 && B_OK=1 || true
   if [ "$A_OK" -eq 1 ] && [ "$B_OK" -eq 1 ]; then
     break
   fi

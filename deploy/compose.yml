@@ -97,6 +97,7 @@ services:
     pull_policy: build
     environment:
       SITE_ID: A
+      RELEASE_DISTRIBUTION: none
       LEGACY_ADMIN_USER: admin
       LEGACY_ADMIN_PASSWORD: admin
       GATEWAY_USER: gateway
@@ -119,6 +120,7 @@ services:
     pull_policy: build
     environment:
       SITE_ID: B
+      RELEASE_DISTRIBUTION: none
       LEGACY_ADMIN_USER: admin
       LEGACY_ADMIN_PASSWORD: admin
       GATEWAY_USER: gateway
@@ -225,6 +227,7 @@ services:
     image: warehouses-demo/admin-ui:dev
     pull_policy: build
     environment:
+      RELEASE_DISTRIBUTION: none
       PHX_SERVER: "true"
       PHX_HOST: localhost
       PORT: "4000"

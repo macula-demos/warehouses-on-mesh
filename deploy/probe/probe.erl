@@ -13,7 +13,7 @@
 %% a fresh stranger identity. Prints the three outcomes for the Phase 4 gate.
 -module(probe).
 
--export([check/1, relay/1, write/1]).
+-export([check/1, relay/1, write/1, clear/1]).
 
 -define(READ, <<"ot/list_freezers">>).
 -define(WRITE, <<"ot/set_freezer_target">>).
@@ -26,7 +26,7 @@ check([Station0, Site0]) ->
     case provider_for(Providers, StationId) of
         {ok, Provider} ->
             Result = call(Pool, Station, StationId, Provider, Realm, ?READ, #{}, 10000),
-            print("site=" ++ binary_to_list(Site), StationId, Provider, Result, none),
+            print(binary_to_list(Site), StationId, Provider, Result, none),
             halt(0);
         none ->
             io:format("site=~s station=~s RESULT no_local_provider providers=~p~n",
@@ -78,6 +78,31 @@ write([Station0, TargetSite0]) ->
         none ->
             io:format("write=~s RESULT no_target_provider providers=~p~n",
                       [TargetSite, Providers]),
+            halt(2)
+    end.
+
+clear([Station0, Site0]) ->
+    Station = to_bin(Station0),
+    Site = to_bin(Site0),
+    {Pool, Realm, _RealmPub, StationId} = connect(Station, Site),
+    {ok, Providers} = providers(Pool, Realm, ?READ),
+    case provider_for(Providers, StationId) of
+        {ok, Provider} ->
+            Url = <<"quic://", Station/binary, ":4433">>,
+            Result = macula:call_station(
+                       Pool, Url, Provider, Realm, ?READ, #{}, 8000,
+                       #{expected_node_id => StationId, report => true, confidential => off}),
+            case Result of
+                {error, Reason} ->
+                    io:format("clear station=~s provider=~s result=~s~n",
+                              [hex(StationId), hex(Provider), reason_text(Reason)]);
+                _ ->
+                    io:format("clear station=~s provider=~s result=~p~n",
+                              [hex(StationId), hex(Provider), Result])
+            end,
+            halt(0);
+        none ->
+            io:format("clear RESULT no_local_provider providers=~p~n", [Providers]),
             halt(2)
     end.
 
